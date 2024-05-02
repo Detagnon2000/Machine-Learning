@@ -1,0 +1,890 @@
+---
+title: "SML ASSIGNMENT 1"
+author: "Détagnon Bernic GBAGUIDI"
+date: "2024-01-12"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(pROC)
+library(caret)
+library(boot)
+library(MASS)
+library(randomForest)
+library(class)
+library(rpart)
+library(dslabs) 
+library(corrplot)
+```
+
+## Exercice 1
+
+```{r}
+mnist <- read_mnist() # Read in the MNIST data
+```
+
+
+```{r}
+
+### loading train set
+xtrain <- mnist$train$images
+ytrain <- mnist$train$labels
+ytrain <- as.factor(ytrain)
+
+### loading test set
+
+xtest <- mnist$test$images
+ytest <- mnist$test$labels
+ytest <- as.factor(ytest)
+
+#### loading only 1 and 7 from train set
+
+xtrain17 <- xtrain[ytrain==1 | ytrain==7,]
+ytrain17 <- ytrain[ytrain==1 | ytrain==7]
+ytrain17 <- as.factor(as.numeric(as.vector(ytrain17)))
+
+#### loading only 1 and 7 from test set
+
+xtest17 <- xtest[ytest==1|ytest==7,]
+ytest17 <- ytest[ytest==1|ytest==7]
+ytest17 <-  as.factor(as.numeric(as.vector(ytest17)))
+```
+
+
+
+### Question 1 Let extract a fragment of the large data set
+
+In order to have a good representation of the level '1' and '7' and because we are going to do a classification , stratifed sampling is a good approach.
+This function below come from the Rmarkdown file of the lecturer Enerst FOKOUE.
+
+It allow to do a stratified sampling and also respect de proportion for train set and test set according to the way it is in the MNIST data set.
+
+The proportion test/train =0.167.
+
+According to percentage of representation of each level we can deduce the n and m.
+
+Percentage of level=0.4
+
+n=5203
+m=865
+```{r}
+stratified.holdout <- function(y, ptr)
+   {
+     n              <- length(y)
+     labels         <- unique(y)       # Obtain classifiers
+     id.tr          <- id.te <- NULL
+     # Loop once for each unique label value
+  
+     y <- sample(sample(sample(y)))
+  
+     for(j in 1:length(labels)) 
+     {
+        sj    <- which(y==labels[j])  # Grab all rows of label type j  
+        nj    <- length(sj)           # Count of label j rows to calc proportion below
+        
+        id.tr <- c(id.tr, (sample(sample(sample(sj))))[1:round(nj*ptr)])
+      }                               # Concatenates each label type together 1 by 1
+  
+      id.te  <- (1:n) [-id.tr]          # Obtain and Shuffle test indices to randomize                                
+  
+      return(list(idx1=id.tr,idx2=id.te)) 
+   }  
+
+
+
+
+hold  <- stratified.holdout(ytrain17, 0.4) 
+   id.tr <- hold$idx1
+   ntr   <- length(id.tr)
+   
+   p   <- ncol(xtrain)
+
+   
+
+   hold  <- stratified.holdout(ytest17, 0.4)
+   id.te <- hold$idx1
+   nte   <- length(id.te)
+   
+  
+   xtr <- xtrain17[id.tr,]
+   ytr17 <- ytrain17[id.tr]
+   xte <- xtest17[id.te,]
+   yte17 <- ytest17[id.te]
+
+```
+
+
+In the MNIST dataset we have the number of input that is 784 . In order to make our machine faster we will accept to lose a bit in accuracy using the reputated tool PCA. It consist of reducing the number of variable based on the fact that some of them are correlated.
+
+
+```{r}
+  
+    pca.tr17 <- prcomp(xtr)
+
+   pv <- cumsum((summary(pca.tr17)$sdev)^2)
+   
+  
+   lambda <- (summary(pca.tr17)$sdev)^2
+   pv <- cumsum(lambda/sum(lambda))
+  
+   
+   q <- min(which(pv>0.90))
+   
+   q    
+      
+   xtr17 <- predict(pca.tr17,xtr)[,1:q]
+   xte17 <- predict(pca.tr17,xte)[,1:q]
+```
+
+
+
+
+### Question 2  Let find the confusion matrice for each data set and for each machine.
+
+####For the first machine 1NN
+```{r}
+##### 1NN
+
+ytr.1nn <- knn(xtr17, xtr17, ytr17, k=1)
+
+   conf.mat.tr.1nn <- table(ytr17, ytr.1nn)
+   
+   #conf.mat.tr.1nn
+   
+yte.1nn <- knn(xtr17, xte17, ytr17, k=1)
+
+   conf.mat.te.1nn <- table(yte17, yte.1nn)
+   
+   #conf.mat.te.1nn   
+   print(conf.mat.tr.1nn)
+   print(conf.mat.te.1nn)
+```
+
+
+#### For the second machine 9NN
+```{r}
+#### 9NN
+ytr.9nn <- knn(xtr17, xtr17, ytr17, k=9)
+
+   conf.mat.tr.9nn <- table(ytr17, ytr.9nn)
+   
+   #conf.mat.tr.1nn
+   
+yte.9nn <- knn(xtr17, xte17, ytr17, k=9)
+
+   conf.mat.te.9nn <- table(yte17, yte.9nn)
+   
+   #conf.mat.te.1nn   
+   print(conf.mat.tr.9nn)
+   print(conf.mat.te.9nn)
+
+```
+
+
+
+
+
+#### For the third machine 18NN
+
+```{r}
+ytr.18nn <- knn(xtr17, xtr17, ytr17, k=18)
+
+   conf.mat.tr.18nn <- table(ytr17, ytr.18nn)
+   
+   #conf.mat.tr.1nn
+   
+yte.18nn <- knn(xtr17, xte17, ytr17, k=18)
+
+   conf.mat.te.18nn <- table(yte17, yte.18nn)
+   
+   #conf.mat.te.1nn   
+   print(conf.mat.tr.18nn)
+   print(conf.mat.te.18nn)
+```
+
+
+
+#### For the fourth machine 27NN
+```{r}
+### 27NN
+
+
+ytr.27nn <- knn(xtr17, xtr17, ytr17, k=27)
+
+   conf.mat.tr.27nn <- table(ytr17, ytr.27nn)
+   
+   #conf.mat.tr.1nn
+   
+yte.27nn <- knn(xtr17, xte17, ytr17, k=27)
+
+   conf.mat.te.27nn <- table(yte17, yte.27nn)
+   
+   #conf.mat.te.1nn   
+   print(conf.mat.tr.27nn)
+   print(conf.mat.te.27nn)
+
+```
+
+
+
+### Question 3  Let display the ROC curves for each data set applying for KNN
+
+#### For the train set
+```{r}
+
+
+roc.tr1nn <- roc(ytr17,as.numeric(as.vector(ytr.1nn)))
+roc.tr9nn <- roc(ytr17,as.numeric(as.vector(ytr.9nn)))
+roc.tr18nn <- roc(ytr17,as.numeric(as.vector(ytr.18nn)))
+roc.tr27nn <- roc(ytr17,as.numeric(as.vector(ytr.27nn)))
+plot(roc.tr1nn,main="ROC Curves for the train set",
+     col = "red", lty = 2, xlim = c(0, 1), ylim = c(0, 1))
+lines(roc.tr9nn, col = "blue", lty = 2)
+lines(roc.tr18nn, col = "green", lty = 2)
+lines(roc.tr27nn, col = "purple", lty = 2)
+legend("bottomright", legend = c("1NN", "9NN", "18NN", "27NN"),
+       col = c("red", "blue", "green", "purple"), lty = 2)
+
+```
+
+#### For the test set
+```{r}
+
+
+roc.te1nn <- roc(yte17,as.numeric(as.vector(yte.1nn)))
+roc.te9nn <- roc(yte17,as.numeric(as.vector(yte.9nn)))
+roc.te18nn <- roc(yte17,as.numeric(as.vector(yte.18nn)))
+roc.te27nn <- roc(yte17,as.numeric(as.vector(yte.27nn)))
+plot.roc(roc.te1nn,main="ROC Curves for the test set",
+         col = "red", lty = 2, xlim = c(0, 1), ylim = c(0, 1))
+lines.roc(roc.te9nn, col = "blue", lty = 2)
+lines.roc(roc.te18nn, col = "green", lty = 2)
+lines.roc(roc.te27nn, col = "purple", lty = 2)
+legend("bottomright", legend = c("1NN", "9NN", "18NN", "27NN"),
+       col = c("red", "blue", "green", "purple"), lty = 2)
+
+```
+
+### Question 4 Let find a False Positive and False Negative.
+
+### N B:
+For my machines , all of them don't have a False Negative
+          
+and normally this is good and explain that the machine 
+          
+perform well. This lead in fact that for the plotting 
+i won't have False negative displayed. Intead it will be a blank window.
+
+#####For 1NN
+
+```{r}
+
+#par(mfrow=c(4,2))
+falseNegative <- which(yte17==1&yte.1nn==7)
+falsePositive <- which(yte17==7&yte.1nn==1)
+
+#### 1 wrong predicted
+image(1:28, 1:28, matrix(xte[falseNegative[1],], nrow=28)[ , 28:1],
+     col = gray(seq(0, 1, 0.05)), xlab = "", ylab="")
+     title(main = "True image")
+    image(1:28, 1:28, matrix(xte[2,], nrow=28)[ , 28:1],
+     col = gray(seq(0, 1, 0.05)), xlab = "", ylab="",)
+    title(main = "False Negative")
+
+image(1:28, 1:28, matrix(xte[falseNegative[2],], nrow=28)[ , 28:1],
+     col = gray(seq(0, 1, 0.05)), xlab = "", ylab="")
+     title(main = "True image")
+    image(1:28, 1:28, matrix(xte[2,], nrow=28)[ , 28:1],
+     col = gray(seq(0, 1, 0.05)), xlab = "", ylab="",)
+    title(main = "False Negative")
+
+##### 7 wrong predicted      
+image(1:28, 1:28, matrix(xte[falsePositive[1],], nrow=28)[ , 28:1], 
+     col = gray(seq(0, 1, 0.05)), xlab = "", ylab="")
+     title(main = "True Image")
+    image(1:28, 1:28, matrix(xte[1,], nrow=28)[ , 28:1], 
+     col = gray(seq(0, 1, 0.05)), xlab = "", ylab="",)
+    title(main = "False Positive")
+image(1:28, 1:28, matrix(xte[falsePositive[2],], nrow=28)[ , 28:1],
+     col = gray(seq(0, 1, 0.05)), xlab = "", ylab="")
+     title(main = "True image")
+    image(1:28, 1:28, matrix(xte[1,], nrow=28)[ , 28:1],
+     col = gray(seq(0, 1, 0.05)), xlab = "", ylab="",)
+    title(main = "False Positive")
+
+```
+
+
+#### For 9NN
+
+```{r}
+falseNegative <- which(yte17==1&yte.9nn==7)
+falsePositive <- which(yte17==7&yte.9nn==1)
+
+#### 1 wrong predicted
+image(1:28, 1:28, matrix(xte[falseNegative[1],], nrow=28)[ , 28:1],
+     col = gray(seq(0, 1, 0.05)), xlab = "", ylab="")
+     title(main = "True image")
+    image(1:28, 1:28, matrix(xte[2,], nrow=28)[ , 28:1],
+     col = gray(seq(0, 1, 0.05)), xlab = "", ylab="",)
+    title(main = "False Negative")
+
+image(1:28, 1:28, matrix(xte[falseNegative[2],], nrow=28)[ , 28:1],
+     col = gray(seq(0, 1, 0.05)), xlab = "", ylab="")
+     title(main = "True image")
+    image(1:28, 1:28, matrix(xte[2,], nrow=28)[ , 28:1],
+     col = gray(seq(0, 1, 0.05)), xlab = "", ylab="",)
+    title(main = "False Negative")
+
+##### 7 wrong predicted      
+image(1:28, 1:28, matrix(xte[falsePositive[1],], nrow=28)[ , 28:1], 
+     col = gray(seq(0, 1, 0.05)), xlab = "", ylab="")
+     title(main = "True Image")
+    image(1:28, 1:28, matrix(xte[1,], nrow=28)[ , 28:1], 
+     col = gray(seq(0, 1, 0.05)), xlab = "", ylab="",)
+    title(main = "False Positive")
+image(1:28, 1:28, matrix(xte[falsePositive[2],], nrow=28)[ , 28:1],
+     col = gray(seq(0, 1, 0.05)), xlab = "", ylab="")
+     title(main = "True image")
+    image(1:28, 1:28, matrix(xte[1,], nrow=28)[ , 28:1],
+     col = gray(seq(0, 1, 0.05)), xlab = "", ylab="",)
+    title(main = "False Positive")
+
+```
+#### For 18NN
+
+```{r}
+falseNegative <- which(yte17==1&yte.18nn==7)
+falsePositive <- which(yte17==7&yte.18nn==1)
+
+#### 1 wrong predicted
+image(1:28, 1:28, matrix(xte[falseNegative[1],], nrow=28)[ , 28:1],
+     col = gray(seq(0, 1, 0.05)), xlab = "", ylab="")
+     title(main = "True image")
+    image(1:28, 1:28, matrix(xte[2,], nrow=28)[ , 28:1],
+     col = gray(seq(0, 1, 0.05)), xlab = "", ylab="",)
+    title(main = "False Negative")
+
+image(1:28, 1:28, matrix(xte[falseNegative[2],], nrow=28)[ , 28:1],
+     col = gray(seq(0, 1, 0.05)), xlab = "", ylab="")
+     title(main = "True image")
+    image(1:28, 1:28, matrix(xte[2,], nrow=28)[ , 28:1],
+     col = gray(seq(0, 1, 0.05)), xlab = "", ylab="",)
+    title(main = "False Negative")
+
+##### 7 wrong predicted      
+image(1:28, 1:28, matrix(xte[falsePositive[1],], nrow=28)[ , 28:1], 
+     col = gray(seq(0, 1, 0.05)), xlab = "", ylab="")
+     title(main = "True Image")
+    image(1:28, 1:28, matrix(xte[1,], nrow=28)[ , 28:1], 
+     col = gray(seq(0, 1, 0.05)), xlab = "", ylab="",)
+    title(main = "False Positive")
+image(1:28, 1:28, matrix(xte[falsePositive[2],], nrow=28)[ , 28:1],
+     col = gray(seq(0, 1, 0.05)), xlab = "", ylab="")
+     title(main = "True image")
+    image(1:28, 1:28, matrix(xte[1,], nrow=28)[ , 28:1],
+     col = gray(seq(0, 1, 0.05)), xlab = "", ylab="",)
+    title(main = "False Positive")
+
+```
+
+
+#### For 27NN
+```{r}
+falseNegative <- which(yte17==1&yte.27nn==7)
+falsePositive <- which(yte17==7&yte.27nn==1)
+
+#### 1 wrong predicted
+image(1:28, 1:28, matrix(xte[falseNegative[1],], nrow=28)[ , 28:1],
+     col = gray(seq(0, 1, 0.05)), xlab = "", ylab="")
+     title(main = "True image")
+    image(1:28, 1:28, matrix(xte[2,], nrow=28)[ , 28:1],
+     col = gray(seq(0, 1, 0.05)), xlab = "", ylab="",)
+    title(main = "False Negative")
+
+image(1:28, 1:28, matrix(xte[falseNegative[2],], nrow=28)[ , 28:1],
+     col = gray(seq(0, 1, 0.05)), xlab = "", ylab="")
+     title(main = "True image")
+    image(1:28, 1:28, matrix(xte[2,], nrow=28)[ , 28:1],
+     col = gray(seq(0, 1, 0.05)), xlab = "", ylab="",)
+    title(main = "False Negative")
+
+##### 7 wrong predicted      
+image(1:28, 1:28, matrix(xte[falsePositive[1],], nrow=28)[ , 28:1], 
+     col = gray(seq(0, 1, 0.05)), xlab = "", ylab="")
+     title(main = "True Image")
+    image(1:28, 1:28, matrix(xte[1,], nrow=28)[ , 28:1], 
+     col = gray(seq(0, 1, 0.05)), xlab = "", ylab="",)
+    title(main = "False Positive")
+image(1:28, 1:28, matrix(xte[falsePositive[2],], nrow=28)[ , 28:1],
+     col = gray(seq(0, 1, 0.05)), xlab = "", ylab="")
+     title(main = "True image")
+    image(1:28, 1:28, matrix(xte[1,], nrow=28)[ , 28:1],
+     col = gray(seq(0, 1, 0.05)), xlab = "", ylab="",)
+    title(main = "False Positive")
+
+```
+
+
+### Question 5  COMMENT
+
+
+
+We can noticed that for each machine the false positives and false negatives  seem to be the same.
+If we can go back to the matrices of confusion , i'm expecting the rate of error decrease when the K is increasing but that's not realy the case . There are not a real partern to deduce. Making an extra reseach in google , the best K can be deduced by doing a cross validation.
+Let remark also that my machines made a lot of errors on the train data what is surprising.
+
+
+## Exercice 2
+
+1- Let find and write $E(Y|X)$.
+
+We have \[
+p_1(y|x) = \frac{1}{{\sqrt{(2\pi\frac{9}{(\pi^2)})}}} \exp\left(-\frac{\pi^2}{18} \left(y - \frac{\pi}{2}x - \frac{3\pi}{4}\cos\left(\frac{\pi}{2}(1 + x)\right)\right)^2\right)
+\]
+It is  a gaussian distribution with parameter \[\mu=\frac{\pi}{2}x +\frac{3\pi}{4}\cos\left(\frac{\pi}{2}(1 + x)\right)\] and \[ \sigma^2= \frac{9}{\pi^2}\]
+
+Then we can conclude that \[  E(Y|X) =\frac{\pi}{2}x +\frac{3\pi}{4}\cos\left(\frac{\pi}{2}(1 + x)\right)\]
+
+
+2- Generate  a join distribution sampling.
+```{r}
+set.seed(19671210)
+n=99
+X <- runif(n ,min = 0,max = 2*pi)
+mu=(pi/2)*X+(0.75*pi*cos((pi/2)*(1+X)))
+sigma=3/pi
+Y=rnorm(n,mu,sigma)
+```
+
+3- Display the scarter plot
+```{r}
+#scatterplot(X,Y)
+data <- data.frame(X,Y)
+ggplot(data,aes(X,Y))+
+  geom_point()
+```
+
+4-
+  1) Let find \[ f^*(X) = \arg\min_f R(f) = \arg\min_f E[l(Y, f(X))]
+  \]
+  
+  We have 
+  
+  
+  \begin{align*}
+  R(f)=&E(l(Y,f(X))) \\
+      =&\int \int (y-f(x))^2P_{X,Y}(x,y)dxdy  \\
+      =&\int \int  (y-f(x))^2P_X(x)P_{Y|X}(y|x)dxdy  \mbox{  $\quad$  ( Bayes)  }  \\
+      =& \int P_X(x)\left(\int (y-f(x))^2P_{Y|X}(y|x) dy \right)dx  \\
+      =&\int P_X(x) E((Y-f(x))^2|X=x)dx
+  \end{align*}
+  
+  
+  
+  With the expression obtained, we can deduce that the $f$ that minimize $R(f)$  is the same that minimize $P_X(x) E((Y-f(x))^2|X=x)$ with $x$ fixed. 
+  
+  Now let denote $Q(f(x))=P_X(x) E((Y-f(x))^2|X=x)$
+  
+  
+   \begin{align*}
+  Q(f(x))=&P_X(x) E((Y-f(x))^2|X=x)  \\
+        =& P_X(x) \left(E((Y^2-2f(x)Y+f(x)^2)|X=x) \right)   \\
+        =& P_X(x) \left(E(Y^2|X=x)-2f(x)E(Y|X=x)+f(x)^2) \right)   
+    \end{align*}
+  
+  
+   Let differenciate $Q(f(x))$ with respect to $f(x)$.
+   
+   
+  We have $Q'(f(x))=P_X(x)(-2E(Y|X=x)+2f(x))$.
+  
+  When we equate to zero we will have $f(x)=E(Y|X=x)$.
+  
+  
+  We can deduce that $f^{*}(x)=E(Y|X=x)$ because $Q''(f(x))=2 \ge 0$
+  
+  **Conclusion : $f^{*}(x)=E(Y|X=x)$**
+  
+  
+  2) Let find \[
+R^* = R(f^*) = \min_f R(f)
+\]
+
+
+
+  We have ,
+  
+  \begin{align*}
+  R^* =& R(f^*) \\
+  =& \int_{X \times Y} l(y, f(x))p_{XY}(x, y) \,dx \,dy \\
+  =&\int_{X \times Y}(y-E(Y|X=x))^2P_{X,Y}(x,y)dxdy  \\
+  =&\int_{X \times Y}(y-E(Y|X=x))^2\frac{1}{{2\pi\sqrt{(2\pi\frac{9}{(\pi^2)})}}} \exp\left(-\frac{\pi^2}{18} \left(y - \frac{\pi}{2}x - \frac{3\pi}{4}\cos\left(\frac{\pi}{2}(1 + x)\right)\right)^2\right)
+dxdy  \\
+=& \int_{X \times Y}(y-E(Y|X=x))^2\frac{1}{{2\pi\sqrt{(2\pi\frac{9}{(\pi^2)})}}} \exp\left(-\frac{\pi^2}{18} \left(y -E(Y|X=x) \right)^2\right)
+dxdy  \\
+  \end{align*}
+
+  We can integrate in first time by integration by part  choosing 
+  
+  $u(x)=(y -E(Y|X=x))$ and
+  
+  $v'(x)=(y -E(Y|X=x)))\exp\left(-\frac{\pi^2}{18} (y -E(Y|X=x))^2 \right)$
+  
+  
+  We will get the integral with respect to $dy$ that will be equal to $\frac{9}{\pi^2}\times \frac{1}{2\pi}$.
+  
+  
+  Now we will integrate with respect to $dx$ on $[0;2\pi[$.
+  
+  We will get $$ R(f^*)=\frac{9}{\pi^2}$$
+  
+  
+  
+3)   Extrinsinc comparison between 4 machines for regression.
+  
+```{r}
+
+
+set.seed(19671210)
+replications <- 100
+
+# vectors to store test errors
+knn_errors <- numeric(replications)
+linear_errors <- numeric(replications)
+poly_errors <- numeric(replications)
+tree_errors <- numeric(replications)
+
+# Loop through replications
+for (i in 1:replications) {
+  
+  # Split the data into training and test sets (60%-40%)
+  idx <- createDataPartition(data$Y, p = 0.6, list = FALSE)
+  train_data <- data[idx, ]
+  test_data <- data[-idx, ]
+  
+  # Model training and prediction for kNN regression
+ 
+  knn_model <- train(Y ~ X, train_data, method="knn")
+  knn_errors[i] <- mean((test_data$Y - predict(knn_model, test_data))^2)
+  
+ 
+  
+  # Model training and prediction for Linear regression
+  linear_model <- lm(Y ~ X, data = train_data)
+  linear_predictions <- predict(linear_model, newdata = test_data)
+  linear_errors[i] <- mean((test_data$Y - linear_predictions)^2)
+  
+  # Model training and prediction for Polynomial regression (degree 2)
+  poly_model <- lm(Y ~ poly(X, degree = 2), data = train_data)
+  poly_predictions <- predict(poly_model, newdata = test_data)
+  poly_errors[i] <- mean((test_data$Y - poly_predictions)^2)
+  
+  
+  
+  # Model training and prediction for Regression Tree Learner 
+  tree_model <- rpart(Y ~ X, data = train_data, method = "anova")
+  tree_predictions <- predict(tree_model, newdata = test_data)
+  tree_errors[i] <- mean((test_data$Y - tree_predictions)^2)
+}
+
+## data set of error
+error_data <- data.frame(
+  kNN = knn_errors,
+  Linear = linear_errors,
+  Polynomial = poly_errors,
+  Tree = tree_errors
+)
+
+# Plotting boxplots
+boxplot(error_data, col = c("red", "blue", "green", "purple"),
+        main = "Comparative Boxplots of Test Errors",
+        ylab = "Test Error", 
+        names = c("kNN", "Linear", "Polynomial", "Tree"))
+
+```
+
+
+```{r}
+cat("We know that R*=9/pi^2 =0.91189 .
+    \n The mean error test of each method is given by\n")
+colMeans(error_data)
+cat("We can see that all of them are greater that R* 
+    but the 'knn'and the 'Tree' are the more close.
+    \n The linear machine is the less better and 
+    it is expected because looking at the scarter plot
+    the relation between X and Y is not linear. ")
+```
+
+
+
+
+## Exercice 3 
+```{r}
+library(mlbench)
+library(kernlab)
+
+
+```
+
+```{r}
+data(DNA)  ### Binary predictor variables
+data(BreastCancer)
+data(spam) # Spam detection data set
+leukemia<-read.csv('leukemia-data-1.csv') # DNA Microarray Gene Expression
+prostate <- read.csv('prostate-cancer-1.csv') # DNA Microarray Gene Expression
+colon <- read.csv('colon-cancer-1.csv')
+```
+
+```{r}
+#### dataset DNA
+## First intruction done in the second t=chunk of the exercice
+
+### 
+
+head(DNA,2)
+cat("In the DNA dataset we have :",ncol(DNA),
+    "colunm and ",nrow(DNA),"observations\n")
+cat("The dimension of the output space is ",ncol(DNA)-1,
+    "and the response is the variable class that
+    is categorical with 3 level : ei,ie,neither(n)\n")
+cat("From the dictionary (help(DNA))of the dataset
+    it said that there are 180 indicator binary 
+    variables that mean that the dataset
+    is type-homogenous and scale-homogenous" )
+
+cat("We have k=n/p=",nrow(DNA)/ncol(DNA)," . This is greater than 5 
+    so this data set in term of size is not
+    bad in context of hight dimensional setting")
+
+set.seed(19671210)
+par(mfrow=c(3,3))
+
+set <- sample(1:(ncol(DNA)-1),9)
+for (i in set){
+ hist(as.numeric(as.vector(DNA[, i])), 
+      main = paste("Variable", i), col = "yellow", border = "red")
+
+  
+}
+
+cat("The dataset contain only categorical variable ,
+    so that's not very useful to investigate about
+    correlation and muticolinerarity")
+```
+
+
+
+
+
+```{r}
+
+head(BreastCancer,1)
+cat("In the BreastCancer dataset we have :",ncol(BreastCancer),"colunm and ",nrow(BreastCancer),"observations\n")
+cat("The dimension of the output space is ",ncol(DNA)-2,
+"and the response is the variable class that
+is categorical with 2 level : 'benign' and 'malignant'\n")
+cat("From the dictionary (help(BrestCancer))
+of the dataset it said that the 9 predictor
+have a value in range 0-10, 
+that mean that the dataset is type-homogenous and scale-homogenous" )
+
+cat("We have k=n/p=",nrow(BreastCancer)/ncol(BreastCancer)," . 
+This is greater than 5 so this data set 
+in term of size is not bad in context of hight dimensional setting")
+
+
+par(mfrow=c(3,3))
+
+#set <- sample(1:(ncol(BreastCancer)-1),9)
+for (i in 2:10){
+ hist(as.numeric(as.vector(BreastCancer[, i])),
+      main = paste("Variable", i), col = "yellow", border = "red")
+
+  
+}
+
+
+cat("The dataset contain only categorical variables ,
+    so that's not very useful to investigate about
+    correlation and muticolinerarity")
+
+```
+
+
+
+
+
+
+```{r}
+
+head(spam,2)
+cat("In the Spam dataset we have :",ncol(spam),
+    "colunm and ",nrow(spam),"observations\n")
+cat("The dimension of the output space is ",ncol(spam)-1,
+    "and the response is the variable type that
+    is categorical with 2 level : 'nonspam' and 'spam'\n\n")
+cat("From the dictionary (help(Spam))of the dataset
+    we can deduce that all the predictors are numeric 
+    then it type-homogenous but in term of scale that's not
+    the case because looking at the variable num415 
+    it range is 0-5 whereas 
+    for the variable capitalTotal it range is 1-15841  \n\n" )
+
+cat("We have k=n/p=",nrow(spam)/ncol(spam)," .
+    This is greater than 5 
+    so this data set in term of size is not bad
+    in context of hight dimensional setting")
+
+
+par(mfrow=c(3,3))
+
+set <- sample(1:(ncol(spam)-1),9)
+for (i in set){
+ hist(as.numeric(as.vector(spam[, i])),
+      main = paste("Variable", i), col = "yellow", border = "red")
+
+  
+}
+par(mfrow=c(1,1))
+##### Correlation between some variables
+corrplot(cor(spam[,sample(1:57,9)]))
+cat("More is level more is the relation of corelation")
+```
+
+
+```{r}
+
+
+
+head(leukemia,1)
+cat("In the Leukemia dataset we have :",ncol(leukemia),
+"colunm and ",nrow(leukemia),"observations\n\n")
+cat("The dimension of the output space is ",ncol(leukemia)-1,
+"and the response is
+the variable Y that is categorical
+with 2 level : '0' and '1'\n\n")
+cat(" We do not have acces to the dictionnary 
+of the the dataset leukemia.
+So I made an exploration of the dataset .
+I deduced that all the predictors are numeric 
+so it's type homogenous. To know if it it is scale-homogenous
+i reseached the mean of the each predictor(colMean(leukemia)),
+then i inspected the distribution by ploting the boxplot and
+of course i looked at the outliers and the max was 3.271207. 
+I concluded with my finding that it is scale-homogenous.    \n\n" )
+
+cat("We have k=n/p=",nrow(leukemia)/ncol(leukemia)," . 
+    This is very less than 5 so this data set 
+    in term of size is very bad in context 
+    of hight dimensional setting")
+
+
+par(mfrow=c(3,3))
+
+set <- sample(2:(ncol(leukemia)),9)
+for (i in set){
+ hist(as.numeric(as.vector(leukemia[, i])),
+      main = paste("Variable", i), col = "yellow", border = "red")
+}
+
+#### correlation of some variable
+par(mfrow=c(1,1))
+corrplot(cor(leukemia[,sample(2:ncol(leukemia),9)]))
+
+cat("More is level more is the relation of corelation")
+```
+
+
+
+
+```{r}
+
+
+
+head(prostate,1)
+cat("In the Prostate dataset we have :",ncol(prostate),
+"colunm and ",nrow(prostate),"observations\n\n ")
+cat("The dimension of the output space is ",ncol(prostate)-1,
+"and the response is the variable Y that 
+is categorical with 2 level : '0' and '1'\n\n")
+cat(" We do not have acces to the dictionnary
+of the the dataset prostate. 
+So I made an exploration of the dataset .
+I deduced that all the predictors are numeric
+so it's type homogenous. To know if it it is scale-homogenous
+i reseached the mean of the each predictor(colMean(prostate)),
+then i inspected the distribution by ploting the boxplot
+and of course i looked at the outliers and the max was 7.5599. 
+I concluded with my finding that it is scale-homogenous. \n\n" )
+
+cat("We have k=n/p=",nrow(prostate)/ncol(prostate)," .
+This is very less than 5 so this data set 
+in term of size is very bad in context
+of hight dimensional setting")
+
+
+par(mfrow=c(3,3))
+
+set <- sample(2:(ncol(prostate)),9)
+for (i in set){
+ hist(as.numeric(as.vector(prostate[, i])),
+      main = paste("Variable", i), col = "yellow", border = "red")
+}
+par(mfrow=c(1,1))
+corrplot(cor(prostate[,sample(2:ncol(prostate),9)]))
+
+cat("More is level more is the relation of corelation")
+```
+
+
+```{r}
+
+
+head(colon,1)
+cat("In the Colon dataset we have :",ncol(colon),
+"colunm and ",nrow(colon),"observations\n\n ")
+cat("The dimension of the output space is ",ncol(colon)-1,
+    "and the response is the variable colon.y
+    that is categorical with 2 level : '1' and '2'\n\n")
+cat(" We do not have acces to the dictionnary 
+    of the the dataset Colon.
+    So I made an exploration of the dataset .
+    I deduced that all the predictors are numeric 
+    so it's type homogenous.
+    To know if  it is scale-homogenous i reseached the mean of
+    the each predictor(colMean(colon)),
+    then i inspected the distribution by ploting the boxplot 
+    and of course i looked at the outliers and the max was 3.330481. 
+    I concluded with my finding that it is scale-homogenous. \n\n" )
+
+cat("We have k=n/p=",nrow(colon)/ncol(colon)," .
+    This is very less than 5 so this data set 
+    in term of size is very bad in context of hight dimensional setting")
+
+
+par(mfrow=c(3,3))
+
+set <- sample(2:(ncol(colon)),9)
+for (i in set){
+ hist(as.numeric(as.vector(colon[, i])),
+      main = paste("Variable", i), col = "yellow", border = "red")
+}
+
+par(mfrow=c(1,1))
+corrplot(cor(colon[,sample(2:ncol(colon),9)]))
+
+cat("More is level more is the relation of corelation")
+```
+
+
+
+
+
+
+
+
+
+
