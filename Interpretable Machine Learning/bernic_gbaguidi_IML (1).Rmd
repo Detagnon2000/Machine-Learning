@@ -1,0 +1,498 @@
+---
+title: "Untitled"
+author: "Bernic "
+date: "2024-03-25"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+
+#####  Part 2
+
+```{r}
+library(mlr3)
+library(mlr3learners)
+library(OpenML)
+library(mlr3pipelines)
+library(mlr3tuning)
+
+```
+
+
+
+```{r}
+bike_data = getOMLDataSet(data.id = 42713)
+bike_data$data <- bike_data$data[,-c(7,13,14)]
+```
+```{r}
+### convert dates to factors 
+bike_data$data$year <- factor(bike_data$data$year)
+bike_data$data$month <- factor(bike_data$data$month)
+bike_data$data$hour <- factor(bike_data$data$hour)
+bike_data$data$weekday <- factor(bike_data$data$weekday)
+
+```
+
+```{r}
+bike_data$data
+```
+
+
+Run simple least squares linear regression with response being count and predictor equal windspeed. Report the coefficient you get.
+
+```{r}
+task<-as_task_regr(bike_data$data,target="count")
+```
+
+```{r}
+task1<-task$clone()
+task1$select("windspeed")
+task1
+```
+```{r}
+lrn_reg<-lrn("regr.lm")
+```
+
+```{r}
+#graph1<-lrn_reg#as_learner(po("scale") %>>% lrn_reg)  
+lrn_reg$train(task1,row_ids =task1$row_ids)
+lrn_reg$model$coefficients['windspeed']
+```
+
+
+
+
+Run least squares linear regression with response being count and predictor being all remaining variables.
+
+```{r}
+graph2<-as_learner(  po("encode", method = "treatment",
+     affect_columns = selector_type("factor"), id = "binary_enc")  %>>% lrn_reg) 
+graph2$train(task,row_ids =task$row_ids)
+graph2$model$regr.lm$model$coefficients["windspeed"]
+```
+
+
+Do the following steps
+Run least squares linear regression with response being count and predictor being all remaining variables except windspeed. Calculate the residuals and call that variable count_residuals.
+Run least squares linear regression with response being windspeed and predictor being all remaining variables except count. Calculate the residuals and call that variable windpseed_residuals.
+Run simple least squares linear regression with response being count_residuals and predictor windpseed_residuals.
+
+
+
+# First step
+
+### create a task with with response being count and predictor being all remaining variables except windspeed
+```{r}
+task3<-task$clone()
+task3$select(task3$feature_names[-10])
+task3
+```
+
+#### train and retrieve the residual
+```{r}
+### train graph 
+graph3<-as_learner(  po("encode", method = "treatment",
+     affect_columns = selector_type("factor"), id = "binary_enc")  %>>% lrn_reg)
+graph3$train(task3)
+count_residuals<-graph3$model$regr.lm$model$residuals
+```
+
+
+
+### create a new task  with response being windspeed and predictor being all remaining variables except count
+
+```{r}
+task4<-as_task_regr(bike_data$data,target = "windspeed")
+idx<-which(task4$feature_names=="count")
+task4$select(task4$feature_names[-idx])
+task4
+```
+
+### train and retrieve the residual
+```{r}
+graph4<-as_learner(  po("encode", method = "treatment",
+     affect_columns = selector_type("factor"), id = "binary_enc")  %>>% lrn_reg)
+graph4$train(task4)
+windspeed_residuals<-graph4$model$regr.lm$model$residuals
+
+```
+
+
+####  create a task for simple linear regresion between residual
+```{r}
+data_residual<-data.frame(count_residuals=count_residuals,windspeed_residuals=windspeed_residuals)
+task5<-as_task_regr(data_residual,target = "count_residuals")
+task5
+```
+### train it and report of the coefficient
+```{r}
+graph5<-as_learner(  po("encode", method = "treatment",
+     affect_columns = selector_type("factor"), id = "binary_enc")  %>>% lrn_reg)
+graph5$train(task5)
+graph5$model$regr.lm$model$coefficients
+```
+
+#### Verify that the coefficients in Steps (b) and (c) are the same.
+
+```{r}
+print("Coefficient in (b):")
+graph2$model$regr.lm$model$coefficients["windspeed"]
+
+
+
+```
+
+```{r}
+print("Coefficient in (c):")
+graph5$model$regr.lm$model$coefficients["windspeed_residuals"]
+```
+
+Replace the simple linear regression model in the second last step in part (c) by an auto-tuned k-nearest neighbors. Visualize the fit (by plotting windpseed_residuals against observed and predicted count_residuals) and compare it to the previous simple linear regression fit. Discuss the result.
+
+
+
+
+### create the kknn auto-tuned
+
+Here i specified the range of k between 1 and 100 to gain in comptational time . The auto tuner will choose the best k between this range
+```{r}
+lrn_kknn<-lrn("regr.kknn",k=to_tune(seq(1,100)))###,k=to_tune(seq(1,500))
+
+at = auto_tuner(
+  tuner = tnr("random_search", batch_size=20),
+  learner = lrn_kknn,
+  resampling = rsmp("cv", folds = 5),
+  measure = msr("regr.mse"),
+  terminator = trm("evals", n_evals = 50)
+)
+
+
+```
+
+
+Let train the auto tuner
+```{r}
+at$train(task5)
+
+```
+
+
+The predicted
+```{r}
+r<-at$predict(task5)
+r
+```
+
+Let plot windspeed_residual against count_residuals and the predicted  
+
+```{r}
+plot(windspeed_residuals,count_residuals)
+points(r$response,col='red')
+```
+
+Let do prediction via the simple regression
+
+```{r}
+t<-graph5$predict(task5)
+t
+```
+
+
+```{r}
+plot(windspeed_residuals,count_residuals)
+points(t$response,col='red')
+```
+
+Comment:  Firtly we can see that the prediction in both case is very bad (the values are very different). But we can remark also thanks to the plot that the value of prediction are similar for kknn and simple regression.  The bad prediction is due to the fact that between windpeed_residual and count_residual there are not a linear relationship.
+
+
+
+
+#####  Part 3
+
+
+Tree based model 
+
+
+
+```{r}
+library(mlr3)
+library(mlr3learners)
+library(mlr3tuning)
+library(OpenML)
+library(mlr3pipelines)
+library(future)
+library(tidyverse)
+future::plan("multisession") 
+```
+
+
+```{r}
+# load credit-g data and define task
+credit_data = getOMLDataSet(data.id = 31)
+p3task = as_task_classif(credit_data$data, target = "class") 
+```
+```{r}
+p3task$data()
+```
+
+
+
+(a)
+
+Let Use the learner classif.rpart with predict_type = "prob" and train it on the task. Visualize the learned tree via
+
+```{r}
+lrn_tree<-lrn('classif.rpart',predict_type = "prob")
+p3graph1<-as_learner(  po("encode", method = "treatment",
+     affect_columns = selector_type("factor"), id = "binary_enc")  %>>% lrn_tree)
+p3graph1$train(p3task)
+```
+Visualization
+
+```{r}
+# load credit-g data and define task
+full_tree_trained <- p3graph1$model$classif.rpart$model
+plot(full_tree_trained , compress = TRUE, margin = 0.1)
+text(full_tree_trained , use.n = TRUE, cex = 0.8)
+```
+
+
+
+
+(b)
+
+We now aim to find a penalty parameter
+that results in a pruned tree with strong predictive power. To this end, we define a tree learner that runs the weakest link algorithm and thereafter 5-fold cross validation to compare the performance between different trees.
+
+
+```{r}
+my_cart_learner_cv = lrn("classif.rpart", xval = 5, predict_type = "prob")
+cart_trained_cv<-as_learner(  po("encode", method = "treatment",
+     affect_columns = selector_type("factor"), id = "binary_enc")  %>>% my_cart_learner_cv )
+cart_trained_cv$train(p3task) 
+```
+
+
+```{r}
+
+rpart::plotcp(cart_trained_cv$model$classif.rpart$model)
+rpart::printcp(cart_trained_cv$model$classif.rpart$model)
+```
+
+
+
+(c)
+
+Pick an
+that is big enough and also has a low error. In the rpart package vignette, the following advice is given:
+
+
+
+```{r}
+cp_optimal <- cart_trained_cv$model$classif.rpart$model$cptable[which.min(cart_trained_cv$model$classif.rpart$model$cptable[,'xerror']), "CP"]
+cp_optimal
+```
+
+Let train and then visualize the tree with the chosen $\alpha$
+```{r}
+lrn_tree_opt<-lrn('classif.rpart',predict_type = "prob",cp=cp_optimal)
+p3graph2<-as_learner(  po("encode", method = "treatment",
+     affect_columns = selector_type("factor"), id = "binary_enc")  %>>% lrn_tree_opt)
+p3graph2$train(p3task)
+```
+
+```{r}
+full_tree_trained_opt <- p3graph2$model$classif.rpart$model
+plot(full_tree_trained_opt , compress = TRUE, margin = 0.1)
+text(full_tree_trained_opt, use.n = TRUE, cex = 0.8)
+```
+
+
+
+
+
+
+Using the benchmark function, compare the predictive performance of the following five algorithms
+
+    A baseline model that uses no features (classif.featureless)
+    A non-pruned CART tree
+    A pruned CART tree with 
+
+as chosen in part (c).
+An auto-tuned xgboost (classif.xgboost). You could for example tune parameters in the following way:
+
+    eta = to_tune(0, 0.5),
+    nrounds = to_tune(10, 5000),
+    max_depth = to_tune(1, 10).
+
+An auto-tuned random forest (classif.ranger). You could for example tune parameters in the following way:
+
+    mtry.ratio = to_tune(0.1, 1),
+    min.node.size = to_tune(1, 50).
+
+
+```{r}
+library(xgboost)
+
+# 
+# g2<-as_learner(  po("encode", method = "treatment",
+#      affect_columns = selector_type("factor"), id = "binary_enc")  %>>% lrn_tree) %>% auto_tuner(
+#     tuner = tnr("random_search", batch_size=25),
+#     learner = .,
+#     resampling = rsmp("cv", folds=5),
+#     measure = msr("classif.ce"),
+#     terminator = trm("evals", n_evals=50)
+#   )
+# 
+# 
+# g3<-as_learner(  po("encode", method = "treatment",
+#      affect_columns = selector_type("factor"), id = "binary_enc")  %>>% lrn('classif.rpart',predict_type = "prob",cp=cp_optimal)) %>% auto_tuner(
+#     tuner = tnr("random_search", batch_size=25),
+#     learner = .,
+#     resampling = rsmp("cv", folds=5),
+#     measure = msr("classif.ce"),
+#     terminator = trm("evals", n_evals=50)
+#   )
+
+
+lrn_xgboost<-lrn('classif.xgboost',eta = to_tune(0, 0.5),
+    nrounds = to_tune(10, 5000),
+    max_depth = to_tune(1, 10))
+
+g4<-as_learner(  po("encode", method = "treatment",
+     affect_columns = selector_type("factor"), id = "binary_enc")  %>>% lrn_xgboost ) %>% auto_tuner(
+    tuner = tnr("random_search", batch_size=25),
+    learner = .,
+    resampling = rsmp("cv", folds=5),
+    measure = msr("classif.ce"),
+    terminator = trm("evals", n_evals=50)
+  )
+
+
+
+
+
+
+lrn_rpartt<-lrn('classif.ranger', mtry.ratio = to_tune(0.1, 1),
+    min.node.size = to_tune(1, 50))
+
+g5<-as_learner(  po("encode", method = "treatment",
+     affect_columns = selector_type("factor"), id = "binary_enc")  %>>% lrn_rpartt ) %>% auto_tuner(
+    tuner = tnr("random_search", batch_size=25),
+    learner = .,
+    resampling = rsmp("cv", folds=5),
+    measure = msr("classif.ce"),
+    terminator = trm("evals", n_evals=50)
+  )
+
+
+
+design<- benchmark_grid(
+  tasks = list(p3task),
+  learners = list(
+                  featureless = lrn("classif.featureless"),
+                  simple_cart=lrn('classif.rpart',predict_type = "prob"),
+                  pruned_cart=lrn('classif.rpart',predict_type = "prob",cp=cp_optimal),
+                  xgbooost=g4,
+                  randomForest=g5
+                  
+                  ),
+  resamplings=list(rsmp("cv", folds=5))
+)
+
+
+bm = benchmark(
+  design =design
+)
+
+```
+
+```{r}
+
+bm$aggregate(list(msr("classif.ce"),
+                   msr("classif.acc"),
+                   msr("classif.auc"),
+                   msr("classif.fpr"),
+                   msr("classif.fnr")))
+```
+```{r}
+mycost=matrix(c(0,1,5,0),nrow=2,ncol=2,byrow = T)
+#msr("classif.costs", id = "german_credit_costs", costs = costs, normalize = FALSE)
+dimnames(mycost) = list(truth = p3task$class_names, predicted = p3task$class_names)
+bm$aggregate(list(msr("classif.costs", costs = t(mycost), normalize = T)))
+```
+
+
+
+(f)
+
+If time allows you can re-run part (d) where the auto-tuned object are optimized via the measure defined in part (e) and see how much the results change.
+
+
+```{r}
+
+
+g6<-as_learner(  po("encode", method = "treatment",
+     affect_columns = selector_type("factor"), id = "binary_enc")  %>>% lrn_xgboost ) %>% auto_tuner(
+    tuner = tnr("random_search", batch_size=25),
+    learner = .,
+    resampling = rsmp("cv", folds=5),
+    measure = msr("classif.costs", costs = t(mycost), normalize = T),
+    terminator = trm("evals", n_evals=50)
+  )
+
+
+
+
+
+
+lrn_rpartt<-lrn('classif.ranger', mtry.ratio = to_tune(0.1, 1),
+    min.node.size = to_tune(1, 50))
+
+g7<-as_learner(  po("encode", method = "treatment",
+     affect_columns = selector_type("factor"), id = "binary_enc")  %>>% lrn_rpartt ) %>% auto_tuner(
+    tuner = tnr("random_search", batch_size=25),
+    learner = .,
+    resampling = rsmp("cv", folds=5),
+    measure = msr("classif.costs", costs = t(mycost), normalize = T),
+    terminator = trm("evals", n_evals=50)
+  )
+
+
+
+design2<- benchmark_grid(
+  tasks = list(p3task),
+  learners = list(
+                  featureless = lrn("classif.featureless"),
+                  simple_cart=lrn('classif.rpart',predict_type = "prob"),
+                  pruned_cart=lrn('classif.rpart',predict_type = "prob",cp=cp_optimal),
+                  xgbooost=g6,
+                  randomForest=g7
+                  
+                  ),
+  resamplings=list(rsmp("cv", folds=5))
+)
+
+
+bm1 = benchmark(
+  design =design2
+)
+
+```
+
+
+
+```{r}
+bm1$aggregate(list(msr("classif.ce"),
+                   msr("classif.acc"),
+                   msr("classif.auc"),
+                   msr("classif.fpr"),
+                   msr("classif.fnr"),
+                   msr("classif.costs", costs = t(mycost), normalize = T)))
+```
+

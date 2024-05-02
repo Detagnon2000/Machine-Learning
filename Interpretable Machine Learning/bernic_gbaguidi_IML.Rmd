@@ -1,0 +1,206 @@
+---
+title: "Assignmemt IML"
+author: "Detagnon Bernic GBAGUIDI"
+date: "2024-03-24"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE)
+```
+
+```{r}
+library(mlr3)
+library(mlr3learners )
+library(mlr3tuning)
+library(mlr3mbo)
+library(glmnet)
+library(OpenML)
+library(mlr3pipelines)
+
+### If parallelizationis wanted also: 
+library(future)
+future::plan("multisession") 
+```
+
+
+data and create task
+
+```{r}
+credit_data = getOMLDataSet(data.id = 31)
+task = as_task_classif(credit_data$data, target = "class") 
+```
+
+
+```{r}
+task
+```
+
+```{r}
+set.seed(04062000)
+```
+
+let split our data into a training and test set.
+
+```{r}
+splits=partition(task)
+```
+
+let build a graph where
+
+  first: Dummy encode variables via po(“encode”),
+  second: Standardize via po(“scale”),
+  third: Logistic Regression with default settings is applied.
+```{r}
+lrn_logr=lrn("classif.log_reg")
+graph<- as_learner(po("encode") %>>% po("scale") %>>%lrn_logr  )
+```
+
+
+Let train the model on the training set and evaluate it on the test set.
+```{r}
+graph$train(task,splits$train)
+graph$predict(task,splits$test)$score(msr("classif.acc"))
+```
+
+(Cross Validation)
+
+In this part we want to train a logistic regression with elastic net.
+
+Let build a new graph
+
+  First and second step as before in Exercise I
+  Third: Use learner classif.glmnet with tunable parameters:
+
+
+```{r}
+lrn_glmnet<-lrn("classif.glmnet",alpha=to_tune(0,1),s=to_tune(0,1))
+graph1<-as_learner(po("encode") %>>% po("scale") %>>%lrn_glmnet  )
+
+tnr_random<- tnr("random_search")
+
+
+rsmp_cv5<-rsmp("cv",folds=5)
+msr_ce = msr("classif.ce")
+
+instance = tune(
+tuner = tnr_random,
+task = task,
+learner = graph1,
+resampling = rsmp_cv5,
+measures = msr_ce,
+terminator = trm("evals", n_evals = 100, k = 0)
+)
+```
+
+
+
+```{r}
+instance$result_learner_param_vals
+```
+
+
+
+What is the CV error of the best configuration?
+
+
+```{r}
+instance$result_y
+```
+What is the test error of the best configuration?
+
+```{r}
+graph1$param_set$values = instance$result_learner_param_vals
+graph1$param_set$values$classif.glmnet.lambda = graph1$param_set$values$classif.glmnet.s
+
+graph1$train(task,splits$train)
+graph1$predict(task,splits$test)$score(msr("classif.ce"))
+```
+
+Print the beta values 
+```{r}
+graph1$model$classif.glmnet$model$beta
+```
+
+
+
+Another configuartion
+
+
+```{r}
+tnr_mbo<-tnr("mbo")
+
+instance2 = tune(
+tuner = tnr_mbo,
+task = task,
+learner = graph1,
+resampling = rsmp_cv5,
+measures = msr_ce,
+terminator = trm("evals", n_evals = 100, k = 0)
+)
+
+
+
+```
+```{r}
+instance2$result_learner_param_vals
+```
+
+
+
+What is the CV error of the best configuration?
+
+
+```{r}
+instance2$result_y
+```
+What is the test error of the best configuration?
+
+```{r}
+graph1$param_set$values = instance2$result_learner_param_vals
+graph1$param_set$values$classif.glmnet.lambda = graph1$param_set$values$classif.glmnet.s
+
+graph1$train(task,splits$train)
+graph1$predict(task,splits$test)$score(msr("classif.ce"))
+```
+
+Print the beta values 
+```{r}
+graph1$model$classif.glmnet$model$beta
+```
+
+
+
+
+(Nested Cross Validation)
+
+  Try out nested cross-validation by
+      defining your graph as an auto_tuner with
+          tuner: random search,
+          resampling: 5-fold cross validation,
+          measure: classification error,
+          terminator: 50 evaluations.
+        Use resample to run 5-fold cross validation.
+        Print out the nested cross validation error.
+
+
+```{r}
+atuner = auto_tuner(
+tuner = tnr_random,
+learner = graph1,
+resampling = rsmp("cv", folds = 5),
+measure = msr_ce,
+terminator = trm("evals", n_evals = 100, k = 0)
+)
+nested = resample(task, atuner, rsmp_cv5, store_models = TRUE)
+nested
+```
+
+
+
+Print out the nested cross validation error.
+```{r}
+nested$aggregate()
+```
+
+
